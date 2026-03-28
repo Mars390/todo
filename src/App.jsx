@@ -9,8 +9,8 @@ const initializeAssistant = (getState /*: any*/, getRecoveryState) => {
     return createSmartappDebugger({
       token: process.env.REACT_APP_TOKEN ?? '',
       initPhrase: `Запусти ${process.env.REACT_APP_SMARTAPP}`,
-      getState,                                           
-      // getRecoveryState: getState,                                           
+      getState,
+      // getRecoveryState: getState,
       nativePanel: {
         defaultText: 'ччччччч',
         screenshotMode: false,
@@ -29,6 +29,7 @@ export class App extends React.Component {
 
     this.state = {
       notes: [{ id: Math.random().toString(36).substring(7), title: 'тест' }],
+      timer: null,
     };
 
     this.assistant = initializeAssistant(() => this.getStateForAssistant());
@@ -80,7 +81,8 @@ export class App extends React.Component {
         ignored_words: [
           'добавить','установить','запиши','поставь','закинь','напомнить', // addNote.sc
           'удалить', 'удали',  // deleteNote.sc
-          'выполни', 'выполнил', 'сделал' // выполнил|сделал
+          'выполни', 'выполнил', 'сделал', // выполнил|сделал
+          'таймер', 'включи таймер', 'запусти таймер', // timerNote.sc
         ],
       },
     };
@@ -94,13 +96,12 @@ export class App extends React.Component {
       switch (action.type) {
         case 'add_note':
           return this.add_note(action);
-
         case 'done_note':
           return this.done_note(action);
-
         case 'delete_note':
           return this.delete_note(action);
-
+        case 'timer':
+          return this.startTimer(action.minutes, action.task);
         default:
           throw new Error();
       }
@@ -135,13 +136,11 @@ export class App extends React.Component {
       action: {
         action_id: action_id,
         parameters: {
-          // значение поля parameters может быть любым, но должно соответствовать серверной логике
-          value: value, // см.файл src/sc/noteDone.sc смартаппа в Studio Code
+          value: value,
         },
       },
     };
     const unsubscribe = this.assistant.sendData(data, (data) => {
-      // функция, вызываемая, если на sendData() был отправлен ответ
       const { type, payload } = data;
       console.log('sendData onData:', type, payload);
       unsubscribe();
@@ -164,8 +163,59 @@ export class App extends React.Component {
     });
   }
 
+  startTimer(minutes, task) {
+    const duration = minutes * 60 * 1000;
+    
+    this.setState({
+      timer: {
+        minutes: minutes,
+        task: task,
+        endTime: Date.now() + duration,
+        isRunning: true
+      }
+    });
+    
+    // Голосовое уведомление
+    if (this.assistant) {
+      this.assistant.sendData({
+        action: {
+          action_id: 'tts',
+          parameters: {
+            text: `⏰ Таймер на ${minutes} минут запущен для "${task}"`
+          }
+        }
+      });
+    }
+    
+    // Установка таймера
+    setTimeout(() => {
+      this.setState({ timer: null });
+      
+      // Уведомление об окончании
+      if (this.assistant) {
+        this.assistant.sendData({
+          action: {
+            action_id: 'tts',
+            parameters: {
+              text: `Время вышло! ${task} готово!`
+            }
+          }
+        });
+      }
+      
+      // Браузерное уведомление
+      if (Notification.permission === 'granted') {
+        new Notification('Таймер завершен', { body: `${task} готово!` });
+      } else if (Notification.permission !== 'denied') {
+        Notification.requestPermission();
+      }
+    }, duration);
+  }
+
   render() {
     console.log('render');
+    const { timer } = this.state;
+    
     return (
       <>
         <TaskList
@@ -178,6 +228,24 @@ export class App extends React.Component {
             this.done_note({ type: 'done_note', id: note.id });
           }}
         />
+        
+        {timer && timer.isRunning && (
+          <div style={{
+            position: 'fixed',
+            bottom: '100px',
+            left: '20px',
+            background: '#4a4a4a',
+            color: 'white',
+            padding: '12px 20px',
+            borderRadius: '25px',
+            fontSize: '16px',
+            boxShadow: '0 2px 10px rgba(0,0,0,0.3)',
+            zIndex: 1000,
+            fontFamily: 'sans-serif'
+          }}>
+            ⏰ {timer.task}: {timer.minutes} мин
+          </div>
+        )}
       </>
     );
   }
